@@ -10,8 +10,10 @@ Usage:
   league_limit.py watch     run the watcher loop (used by launchd)
   league_limit.py status    show today's usage
   league_limit.py json      today's usage as JSON (used by the menu bar app)
+  league_limit.py bonus     allow 1 more game today
 """
 
+import fcntl
 import json
 import os
 import signal
@@ -40,6 +42,7 @@ CLIENT_PROCESSES = [
 
 STATE_DIR = os.path.expanduser("~/Library/Application Support/league-limit")
 STATE_FILE = os.path.join(STATE_DIR, "state.json")
+LOCK_FILE = os.path.join(STATE_DIR, "state.lock")
 
 
 def day_key(ts):
@@ -53,6 +56,7 @@ def load_state():
     except (FileNotFoundError, json.JSONDecodeError):
         state = {}
     state.setdefault("games", {})
+    state.setdefault("bonus", {})
     state.setdefault("current_game_start", None)
     state.setdefault("last_game_end", None)
     return state
@@ -64,6 +68,14 @@ def save_state(state):
     with open(tmp, "w") as f:
         json.dump(state, f, indent=2)
     os.replace(tmp, STATE_FILE)
+
+
+def state_lock():
+    """Exclusive lock so the watcher and `bonus` don't overwrite each other's changes."""
+    os.makedirs(STATE_DIR, exist_ok=True)
+    f = open(LOCK_FILE, "w")
+    fcntl.flock(f, fcntl.LOCK_EX)
+    return f
 
 
 def is_running(names):
@@ -91,6 +103,10 @@ def games_today(state, now):
     return state["games"].get(day_key(now), 0)
 
 
+def limit_today(state, now):
+    return GAMES_PER_DAY + state["bonus"].get(day_key(now), 0)
+
+
 def tick(state, now, game_running, client_running):
     """Advance the state machine one step. Returns (actions, changed).
 
@@ -99,7 +115,7 @@ def tick(state, now, game_running, client_running):
     actions = []
     changed = False
     start = state["current_game_start"]
-    limit_reached = games_today(state, now) >= GAMES_PER_DAY
+    limit_reached = games_today(state, now) >= limit_today(state, now)
 
     if game_running and start is None:
         if limit_reached:
@@ -113,7 +129,7 @@ def tick(state, now, game_running, client_running):
             key = day_key(start)
             state["games"][key] = state["games"].get(key, 0) + 1
             state["last_game_end"] = now
-            limit_reached = games_today(state, now) >= GAMES_PER_DAY
+            limit_reached = games_today(state, now) >= limit_today(state, now)
         changed = True
 
     if limit_reached and client_running and not game_running and state["current_game_start"] is None:
@@ -128,13 +144,14 @@ def watch():
     print(f"league-limit watching (limit {GAMES_PER_DAY}/day, reset {RESET_HOUR}:00)", flush=True)
     last_notice = 0
     while True:
-        state = load_state()
-        now = time.time()
-        actions, changed = tick(
-            state, now, is_running(GAME_PROCESSES), is_running(CLIENT_PROCESSES)
-        )
-        if changed:
-            save_state(state)
+        game_running = is_running(GAME_PROCESSES)
+        client_running = is_running(CLIENT_PROCESSES)
+        with state_lock():
+            state = load_state()
+            now = time.time()
+            actions, changed = tick(state, now, game_running, client_running)
+            if changed:
+                save_state(state)
         for action, message in actions:
             kill(GAME_PROCESSES + CLIENT_PROCESSES if action == "kill_game" else CLIENT_PROCESSES)
             if now - last_notice > 30:
@@ -147,11 +164,12 @@ def status():
     state = load_state()
     now = time.time()
     played = games_today(state, now)
-    print(f"Today ({day_key(now)}): {played}/{GAMES_PER_DAY} games played")
+    limit = limit_today(state, now)
+    print(f"Today ({day_key(now)}): {played}/{limit} games played")
     if state["current_game_start"]:
         mins = int((now - state["current_game_start"]) // 60)
         print(f"In a game right now ({mins} min)")
-    elif played >= GAMES_PER_DAY:
+    elif played >= limit:
         print(f"Limit reached. Resets at {RESET_HOUR}:00.")
     recent = sorted(state["games"].items())[-7:]
     if recent:
@@ -165,11 +183,21 @@ def status_json():
     print(json.dumps({
         "day": day_key(now),
         "played": games_today(state, now),
-        "limit": GAMES_PER_DAY,
+        "limit": limit_today(state, now),
+        "bonus": state["bonus"].get(day_key(now), 0),
         "reset_hour": RESET_HOUR,
         "in_game_minutes": int((now - start) // 60) if start else None,
         "history": dict(sorted(state["games"].items())[-7:]),
     }))
+
+
+def add_bonus():
+    with state_lock():
+        state = load_state()
+        key = day_key(time.time())
+        state["bonus"][key] = state["bonus"].get(key, 0) + 1
+        save_state(state)
+    print(f"1 more game allowed today. Limit is now {limit_today(state, time.time())}.")
 
 
 def main():
@@ -181,6 +209,8 @@ def main():
         status()
     elif cmd == "json":
         status_json()
+    elif cmd == "bonus":
+        add_bonus()
     else:
         print(__doc__)
         sys.exit(1)
