@@ -10,7 +10,6 @@ struct Status: Decodable {
     let day: String
     let played: Int
     let limit: Int
-    let bonus: Int?
     let reset_hour: Int
     let in_game_minutes: Int?
     let history: [String: Int]
@@ -115,12 +114,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             } else {
                 info("You can still play today")
             }
-            if let bonus = s.bonus, bonus > 0 {
-                info("Includes \(bonus) extra game\(bonus == 1 ? "" : "s") today")
-            }
-            if s.in_game_minutes == nil && s.played >= s.limit {
-                menu.addItem(withTitle: "Allow 1 More Game…", action: #selector(allowOneMore), keyEquivalent: "").target = self
-            }
             if !s.history.isEmpty {
                 menu.addItem(.separator())
                 info("Last 7 days")
@@ -153,19 +146,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func startWatcher() {
         run("/bin/launchctl", ["bootstrap", "gui/\(getuid())", plistPath])
-        refresh()
-    }
-
-    @objc func allowOneMore() {
-        guard let cmd = watcherCommand() else { return }
-        NSApp.activate(ignoringOtherApps: true)
-        let alert = NSAlert()
-        alert.messageText = "Play 1 more game today?"
-        alert.informativeText = "Today's limit goes up by one. It resets back to normal at \(status?.reset_hour ?? 4):00."
-        alert.addButton(withTitle: "One More Game")
-        alert.addButton(withTitle: "Cancel")
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-        run(cmd.python, [cmd.script, "bonus"])
         refresh()
     }
 

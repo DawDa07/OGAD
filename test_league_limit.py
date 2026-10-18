@@ -9,7 +9,7 @@ def ts(s):
 
 
 def fresh():
-    return {"games": {}, "bonus": {}, "current_game_start": None, "last_game_end": None}
+    return {"games": {}, "current_game_start": None, "last_game_end": None}
 
 
 class TickTest(unittest.TestCase):
@@ -37,18 +37,6 @@ class TickTest(unittest.TestCase):
         actions, _ = ll.tick(state, ts("2026-10-17 18:31"), True, True)
         self.assertEqual([a for a, _ in actions], ["kill_game"])
         self.assertIsNone(state["current_game_start"])
-
-    def test_bonus_allows_one_more_game_that_day(self):
-        state = fresh()
-        self.play(state, "2026-10-17 18:00", "2026-10-17 18:30")
-        state["bonus"]["2026-10-17"] = 1
-        actions, _ = ll.tick(state, ts("2026-10-17 18:40"), False, True)
-        self.assertEqual(actions, [])
-        self.play(state, "2026-10-17 18:41", "2026-10-17 19:10")
-        actions, _ = ll.tick(state, ts("2026-10-17 19:11"), True, True)
-        self.assertEqual([a for a, _ in actions], ["kill_game"])
-        actions, _ = ll.tick(state, ts("2026-10-18 10:05"), True, True)
-        self.assertEqual(actions, [])
 
     def test_remake_does_not_count(self):
         state = fresh()
