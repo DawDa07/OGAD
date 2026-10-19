@@ -22,7 +22,7 @@ from datetime import datetime, timedelta
 
 GAMES_PER_DAY = 1
 # Saturday and Sunday (by the RESET_HOUR-shifted day, so Friday night counts as Friday).
-WEEKEND_GAMES_PER_DAY = 2
+WEEKEND_GAMES_PER_DAY = 1
 # The "day" rolls over at this local hour, so a 1am game counts toward the previous day.
 RESET_HOUR = 4
 # Matches shorter than this (e.g. remakes) don't count.

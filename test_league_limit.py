@@ -39,14 +39,14 @@ class TickTest(unittest.TestCase):
         self.assertEqual([a for a, _ in actions], ["kill_game"])
         self.assertIsNone(state["current_game_start"])
 
-    def test_weekend_allows_two_games(self):
+    def test_weekend_limit(self):
         state = fresh()
-        self.play(state, "2026-10-17 18:00", "2026-10-17 18:30")
-        actions, _ = ll.tick(state, ts("2026-10-17 18:35"), False, True)
-        self.assertEqual(actions, [])
-        self.play(state, "2026-10-17 18:36", "2026-10-17 19:10")
-        self.assertEqual(state["games"], {"2026-10-17": 2})
-        actions, _ = ll.tick(state, ts("2026-10-17 19:11"), True, True)
+        for i in range(ll.WEEKEND_GAMES_PER_DAY):
+            actions, _ = ll.tick(state, ts(f"2026-10-17 1{i}:00"), True, True)
+            self.assertEqual(actions, [])
+            ll.tick(state, ts(f"2026-10-17 1{i}:30"), False, True)
+        self.assertEqual(state["games"], {"2026-10-17": ll.WEEKEND_GAMES_PER_DAY})
+        actions, _ = ll.tick(state, ts("2026-10-17 23:00"), True, True)
         self.assertEqual([a for a, _ in actions], ["kill_game"])
 
     def test_friday_night_is_a_weekday(self):
