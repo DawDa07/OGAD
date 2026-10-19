@@ -21,6 +21,8 @@ import time
 from datetime import datetime, timedelta
 
 GAMES_PER_DAY = 1
+# Saturday and Sunday (by the RESET_HOUR-shifted day, so Friday night counts as Friday).
+WEEKEND_GAMES_PER_DAY = 2
 # The "day" rolls over at this local hour, so a 1am game counts toward the previous day.
 RESET_HOUR = 4
 # Matches shorter than this (e.g. remakes) don't count.
@@ -91,6 +93,11 @@ def games_today(state, now):
     return state["games"].get(day_key(now), 0)
 
 
+def limit_today(now):
+    weekday = datetime.strptime(day_key(now), "%Y-%m-%d").weekday()
+    return WEEKEND_GAMES_PER_DAY if weekday >= 5 else GAMES_PER_DAY
+
+
 def tick(state, now, game_running, client_running):
     """Advance the state machine one step. Returns (actions, changed).
 
@@ -99,11 +106,11 @@ def tick(state, now, game_running, client_running):
     actions = []
     changed = False
     start = state["current_game_start"]
-    limit_reached = games_today(state, now) >= GAMES_PER_DAY
+    limit_reached = games_today(state, now) >= limit_today(now)
 
     if game_running and start is None:
         if limit_reached:
-            actions.append(("kill_game", "You've already played your game today. See you tomorrow."))
+            actions.append(("kill_game", "You've already played today's games. See you tomorrow."))
         else:
             state["current_game_start"] = now
             changed = True
@@ -113,7 +120,7 @@ def tick(state, now, game_running, client_running):
             key = day_key(start)
             state["games"][key] = state["games"].get(key, 0) + 1
             state["last_game_end"] = now
-            limit_reached = games_today(state, now) >= GAMES_PER_DAY
+            limit_reached = games_today(state, now) >= limit_today(now)
         changed = True
 
     if limit_reached and client_running and not game_running and state["current_game_start"] is None:
@@ -125,7 +132,7 @@ def tick(state, now, game_running, client_running):
 
 
 def watch():
-    print(f"league-limit watching (limit {GAMES_PER_DAY}/day, reset {RESET_HOUR}:00)", flush=True)
+    print(f"league-limit watching (limit {GAMES_PER_DAY}/day, {WEEKEND_GAMES_PER_DAY}/day on weekends, reset {RESET_HOUR}:00)", flush=True)
     last_notice = 0
     while True:
         state = load_state()
@@ -147,11 +154,12 @@ def status():
     state = load_state()
     now = time.time()
     played = games_today(state, now)
-    print(f"Today ({day_key(now)}): {played}/{GAMES_PER_DAY} games played")
+    limit = limit_today(now)
+    print(f"Today ({day_key(now)}): {played}/{limit} games played")
     if state["current_game_start"]:
         mins = int((now - state["current_game_start"]) // 60)
         print(f"In a game right now ({mins} min)")
-    elif played >= GAMES_PER_DAY:
+    elif played >= limit:
         print(f"Limit reached. Resets at {RESET_HOUR}:00.")
     recent = sorted(state["games"].items())[-7:]
     if recent:
@@ -165,7 +173,7 @@ def status_json():
     print(json.dumps({
         "day": day_key(now),
         "played": games_today(state, now),
-        "limit": GAMES_PER_DAY,
+        "limit": limit_today(now),
         "reset_hour": RESET_HOUR,
         "in_game_minutes": int((now - start) // 60) if start else None,
         "history": dict(sorted(state["games"].items())[-7:]),
